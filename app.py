@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from functools import lru_cache
 from io import BytesIO
+from pathlib import Path
 
 import cv2
 from fastapi import FastAPI, File, HTTPException, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from PIL import Image, UnidentifiedImageError
 from ultralytics import YOLO
 
@@ -63,22 +65,23 @@ def parse_detections(result) -> list[dict]:
 @app.post("/detect")
 async def detect(file: UploadFile = File(...)):
     image = await load_image(file)
-    result = run_detection(image)
+    result = await run_in_threadpool(run_detection, image)
     return {"detections": parse_detections(result)}
 
 
 @app.post("/detect/image")
 async def detect_image(file: UploadFile = File(...)):
     image = await load_image(file)
-    result = run_detection(image)
+    result = await run_in_threadpool(run_detection, image)
 
     annotated_bgr = result.plot()
     ok, png = cv2.imencode(".png", annotated_bgr)
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to encode annotated image")
 
+    output_name = f"{Path(file.filename or 'detected').stem}.png"
     return Response(
         content=png.tobytes(),
         media_type="image/png",
-        headers={"Content-Disposition": "attachment; filename=detected.png"},
+        headers={"Content-Disposition": f"attachment; filename={output_name}"},
     )
